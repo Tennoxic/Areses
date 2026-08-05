@@ -1,0 +1,42 @@
+services:
+  areses:
+    build: .
+    image: areses:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - areses-data:/app/data
+    environment:
+      # Default: plain HTTP on your LAN (e.g. "server PC" + read from other
+      # devices on the same network) -- this is ARESES's primary target
+      # use case. Cookies work over HTTP because ARESES_LOCAL_MODE=true
+      # keeps the `secure` cookie flag off (this is the ONLY thing
+      # LOCAL_MODE controls for cookies).
+      #
+      # If you're putting this behind a reverse proxy with real HTTPS and
+      # exposing it to the internet, switch to:
+      #   ARESES_LOCAL_MODE: "false"
+      #   ARESES_BASE_URL: "https://your-domain.example.com"
+      # Getting LOCAL_MODE backwards means login fails silently (plain HTTP
+      # with LOCAL_MODE=false -> secure cookie never gets sent by the
+      # browser) or the reverse (HTTPS with LOCAL_MODE=true just leaves the
+      # cookie less strict than it needs to be, not broken).
+      # ARESES_BASE_URL only affects the link generated inside
+      # password-reset emails; it does not affect cookies. If unset it
+      # falls back to the admin-configurable "Base URL" field in
+      # Settings -> SMTP, or to http://localhost:8000 if neither is set.
+      ARESES_LOCAL_MODE: "true"
+      #
+      # Secrets (SMTP password, AI provider API key, VAPID push key, per-feed
+      # HTTP auth passwords) are encrypted at rest. Without ARESES_SECRET_KEY
+      # set, a key is auto-generated on first run and stored in the
+      # areses-data volume next to the database -- fine for the default
+      # single-machine LAN setup above, but it means a copy of that volume
+      # alone is enough to decrypt those secrets. For a real deployment,
+      # generate a key once and keep it outside the volume/backups:
+      #   docker compose run --rm areses python -m app.core.crypto generate-key
+      # ARESES_SECRET_KEY: "<paste the generated key here>"
+
+volumes:
+  areses-data:

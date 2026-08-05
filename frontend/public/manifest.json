@@ -1,0 +1,16 @@
+{
+  "name": "ARESES",
+  "short_name": "ARESES",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ece8de",
+  "theme_color": "#2b4c7e",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
