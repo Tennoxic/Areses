@@ -191,7 +191,15 @@ async def fetch_single_feed(source_id: int) -> None:
                     )
                     await ai_summary.maybe_enqueue_summary(session, article)
                     await _apply_auto_read_rules(session, source_id_val, article)
-                    await _notify_subscribers(session, source_id_val, article)
+                    try:
+                        await _notify_subscribers(session, source_id_val, article)
+                    except Exception:
+                        _logger.exception(
+                            "push notification failed for article %s (source %s); "
+                            "continuing with live event broadcast",
+                            article.id,
+                            source_id_val,
+                        )
                     subscriber_ids_result = await session.execute(
                         select(Subscription.user_id).where(
                             Subscription.source_id == source_id_val
