@@ -81,18 +81,10 @@ export function useArticles(filter) {
         cacheRef.current.set(filterKey, { articles: next, hasMore });
         return next;
       });
-      for (const [key, entry] of cacheRef.current.entries()) {
-        if (key === filterKey) continue;
-        let entryFilter;
-        try {
-          entryFilter = JSON.parse(key);
-        } catch {
-          continue;
+      for (const key of cacheRef.current.keys()) {
+        if (key !== filterKey) {
+          cacheRef.current.delete(key);
         }
-        const patchedArticles = entry.articles
-          .map((article) => (article.id === articleId ? { ...article, ...patch } : article))
-          .filter((article) => matchesFilter(article, entryFilter));
-        cacheRef.current.set(key, { articles: patchedArticles, hasMore: entry.hasMore });
       }
     },
     [filterKey, filter, hasMore]

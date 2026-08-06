@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Cookie, Depends, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import require_auth
+from app.api.deps import get_optional_user, require_auth
 from app.core.config import settings
 from app.db.models import User
 from app.db.session import get_session
@@ -10,6 +10,7 @@ from app.schemas.auth import (
     LoginRequest,
     RegisterRequest,
     ResetPasswordRequest,
+    SessionOut,
     UserOut,
 )
 from app.services import auth_service
@@ -71,6 +72,11 @@ async def reset_password_route(
 ) -> dict:
     await auth_service.reset_password(session, body.token, body.new_password)
     return {"status": "ok"}
+
+
+@router.get("/session", response_model=SessionOut)
+async def session_route(user: User | None = Depends(get_optional_user)) -> SessionOut:
+    return SessionOut(authenticated=user is not None, user=user)
 
 
 @router.get("/me", response_model=UserOut)

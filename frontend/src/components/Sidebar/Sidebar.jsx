@@ -7,6 +7,24 @@ import { confirmDialog } from "../../utils/dialog";
 import { Checkbox, Select } from "../Ui/Ui";
 
 const EMPTY_FILTER = { sourceId: null, folderId: null, unreadOnly: false, starredOnly: false, readLaterOnly: false, summariesOnly: false, query: "" };
+const COLLAPSED_FOLDERS_KEY = "areses.collapsedFolderIds";
+
+function loadCollapsedFolderIds() {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_FOLDERS_KEY);
+    return raw ? new Set(JSON.parse(raw)) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedFolderIds(ids) {
+  try {
+    localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...ids]));
+  } catch {
+    /* localStorage unavailable, collapse state just won't persist */
+  }
+}
 
 export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshSignal, unreadRefreshSignal }) {
   const { t } = useTranslation();
@@ -17,6 +35,9 @@ export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshS
   const [savedSearches, setSavedSearches] = useState([]);
   const [bulkMode, setBulkMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState(loadCollapsedFolderIds);
+  const [draggingSubscriptionId, setDraggingSubscriptionId] = useState(null);
+  const [dropTargetFolderId, setDropTargetFolderId] = useState(undefined);
 
   useEffect(() => {
     api.get("/api/feeds").then(setFeeds).catch(() => showToast(t("sidebar.loadFeedsError"), "error"));
@@ -82,30 +103,61 @@ export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshS
   async function moveFeedToFolder(subscriptionId, folderId) {
     await api.post("/api/feeds/bulk-move", { subscriptionIds: [subscriptionId], folderId });
     setFeeds(feeds.map((f) => (f.subscriptionId === subscriptionId ? { ...f, folderId } : f)));
+    const folderName = folderId ? folders.find((f) => f.id === folderId)?.name : null;
+    showToast(folderName ? t("sidebar.feedMovedToFolder", { folder: folderName }) : t("sidebar.feedMovedToRoot"));
   }
 
   function handleFeedDragStart(event, subscriptionId) {
     event.dataTransfer.setData("text/plain", String(subscriptionId));
     event.dataTransfer.effectAllowed = "move";
+    setDraggingSubscriptionId(subscriptionId);
+  }
+
+  function handleFeedDragEnd() {
+    setDraggingSubscriptionId(null);
+    setDropTargetFolderId(undefined);
+  }
+
+  function handleFolderDragEnter(event, folderId) {
+    event.preventDefault();
+    setDropTargetFolderId(folderId);
+  }
+
+  function handleFolderDragLeave(event, folderId) {
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setDropTargetFolderId((current) => (current === folderId ? undefined : current));
   }
 
   function handleFolderDrop(event, folderId) {
     event.preventDefault();
+    setDropTargetFolderId(undefined);
+    setDraggingSubscriptionId(null);
     const subscriptionId = Number(event.dataTransfer.getData("text/plain"));
     if (!subscriptionId) return;
     moveFeedToFolder(subscriptionId, folderId);
+  }
+
+  function toggleFolderCollapsed(folderId) {
+    setCollapsedFolderIds((current) => {
+      const next = new Set(current);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      saveCollapsedFolderIds(next);
+      return next;
+    });
   }
 
   function renderFeedItem(feed, indent) {
     return (
       <div
         key={feed.subscriptionId}
-        className={`sidebar-item ${feed.isBroken ? "broken" : ""} ${isActive((f) => f.sourceId === feed.sourceId)}`}
+        className={`sidebar-item ${feed.isBroken ? "broken" : ""} ${draggingSubscriptionId === feed.subscriptionId ? "dragging" : ""} ${isActive((f) => f.sourceId === feed.sourceId)}`}
         style={{ ...(indent ? { paddingLeft: 32 } : undefined), opacity: feed.hidden ? 0.5 : 1 }}
         onClick={() => (bulkMode ? null : selectFilter({ sourceId: feed.sourceId }))}
         title={feed.lastErrorMessage || undefined}
         draggable
         onDragStart={(e) => handleFeedDragStart(e, feed.subscriptionId)}
+        onDragEnd={handleFeedDragEnd}
       >
         {bulkMode && (
           <Checkbox
@@ -113,6 +165,7 @@ export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshS
             onChange={(e) => toggleSelected(feed.subscriptionId, e)}
           />
         )}
+        <span className="drag-handle" title={t("sidebar.dragToMove")} aria-hidden="true">⠿</span>
         <span>{feed.customName || feed.url}</span>
         {feed.unreadCount > 0 && <span className="count">{feed.unreadCount}</span>}
         <button
@@ -145,23 +198,37 @@ export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshS
     const nextVisited = new Set(visited).add(folder.id);
     const children = childFoldersByParent.get(folder.id) || [];
     const folderFeeds = feedsBySourceFolder.get(folder.id) || [];
+    const isCollapsed = collapsedFolderIds.has(folder.id);
+    const hasChildren = children.length > 0 || folderFeeds.length > 0;
     return (
       <div key={folder.id}>
         <div
-          className="sidebar-item"
+          className={`sidebar-item folder-row ${isActive((f) => f.folderId === folder.id)} ${dropTargetFolderId === folder.id ? "drop-target" : ""}`}
           style={{ paddingLeft: 16 + depth * 16 }}
           onClick={() => (bulkMode ? null : selectFilter({ folderId: folder.id }))}
+          onDragEnter={(e) => handleFolderDragEnter(e, folder.id)}
           onDragOver={(e) => e.preventDefault()}
+          onDragLeave={(e) => handleFolderDragLeave(e, folder.id)}
           onDrop={(e) => handleFolderDrop(e, folder.id)}
         >
-          <span>{folder.name}</span>
+          <span
+            className={`folder-twisty ${isCollapsed ? "collapsed" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasChildren) toggleFolderCollapsed(folder.id);
+            }}
+            aria-hidden="true"
+          >
+            {hasChildren ? "▾" : ""}
+          </span>
+          <span className="folder-name">{folder.name}</span>
         </div>
-        {folderFeeds.map((feed) => (
+        {!isCollapsed && folderFeeds.map((feed) => (
           <div key={feed.subscriptionId} style={{ paddingLeft: depth * 16 }}>
             {renderFeedItem(feed, true)}
           </div>
         ))}
-        {children.map((child) => renderFolder(child, depth + 1, nextVisited))}
+        {!isCollapsed && children.map((child) => renderFolder(child, depth + 1, nextVisited))}
       </div>
     );
   }
@@ -195,9 +262,11 @@ export function Sidebar({ onAddFeed, onOpenManageFeeds, onOpenSettings, refreshS
 
       <div className="sidebar-section">
         <div
-          className="sidebar-section-title"
+          className={`sidebar-section-title ${dropTargetFolderId === null ? "drop-target" : ""}`}
           style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}
+          onDragEnter={(e) => handleFolderDragEnter(e, null)}
           onDragOver={(e) => e.preventDefault()}
+          onDragLeave={(e) => handleFolderDragLeave(e, null)}
           onDrop={(e) => handleFolderDrop(e, null)}
         >
           <span>{t("settings.feeds")}</span>

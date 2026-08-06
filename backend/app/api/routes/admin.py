@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from httpx import HTTPStatusError, RequestError
 from pydantic import ConfigDict
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +18,7 @@ from app.db.models import (
 from app.db.session import get_session
 from app.schemas.base import CamelModel
 from app.services import settings_service
+from app.services.providers.client import ProviderError, get_model_response
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -151,3 +153,39 @@ async def get_setting(
         return {"key": key, "value": None, "isSet": bool(value)}
     value = await settings_service.get_global_setting(session, key)
     return {"key": key, "value": value}
+
+
+class AITestRequest(CamelModel):
+    provider: str
+    model: str
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+class AITestResponse(CamelModel):
+    success: bool
+    message: str
+
+
+@router.post("/ai/test", response_model=AITestResponse)
+async def test_ai_provider(
+    body: AITestRequest,
+    admin: User = Depends(require_admin),
+    session: AsyncSession = Depends(get_session),
+) -> AITestResponse:
+    api_key = body.api_key or await settings_service.get_global_setting(session, "aiApiKey")
+    base_url = body.base_url or await settings_service.get_global_setting(session, "aiBaseUrl")
+    try:
+        await get_model_response(
+            body.provider, body.model, "Reply with exactly one word: OK", api_key, base_url
+        )
+    except ProviderError as error:
+        return AITestResponse(success=False, message=str(error))
+    except HTTPStatusError as error:
+        return AITestResponse(
+            success=False,
+            message=f"provider responded with HTTP {error.response.status_code}",
+        )
+    except RequestError:
+        return AITestResponse(success=False, message="could not reach the provider (network error)")
+    return AITestResponse(success=True, message="connection successful")

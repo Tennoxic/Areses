@@ -1,4 +1,10 @@
-@import url("https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap");
+@import "@fontsource-variable/source-serif-4/opsz.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/share-tech-mono/400.css";
 
 
 
@@ -17,7 +23,7 @@
   --mark-bg:        #e6ce89;
   --night-light-opacity: 0;
 
-  --font-display: "Source Serif 4", Georgia, serif;
+  --font-display: "Source Serif 4 Variable", Georgia, serif;
   --font-ui:      "IBM Plex Sans", system-ui, sans-serif;
   --font-mono:    "IBM Plex Mono", ui-monospace, monospace;
 
@@ -207,6 +213,49 @@ button { font-family: var(--font-ui); cursor: pointer; }
 
 .sidebar-item .count { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
 .sidebar-item.broken { color: var(--danger); }
+
+.sidebar-item.dragging { opacity: 0.4; }
+
+.sidebar-item[draggable="true"] .drag-handle {
+  cursor: grab;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1;
+  padding-right: 2px;
+  flex-shrink: 0;
+}
+
+.sidebar-item[draggable="true"]:active .drag-handle { cursor: grabbing; }
+
+.sidebar-item.folder-row {
+  gap: 4px;
+}
+
+.sidebar-item.folder-row .folder-twisty {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.sidebar-item.folder-row .folder-twisty.collapsed { transform: rotate(-90deg); }
+
+.sidebar-item.folder-row.drop-target {
+  background: var(--accent-soft, var(--stone-dark));
+  border-left-color: var(--accent);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.sidebar-section-title.drop-target {
+  background: var(--accent-soft, var(--stone-dark));
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
+.sidebar-item.folder-row .folder-name { flex: 1; }
 
 
 
@@ -926,8 +975,6 @@ mark { background: var(--mark-bg); color: var(--ink); padding: 0 2px; border-rad
   color: var(--muted);
 }
 
-
-@import url("https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap");
 
 :root {
   --font-mono: "Share Tech Mono", "IBM Plex Mono", ui-monospace, monospace;

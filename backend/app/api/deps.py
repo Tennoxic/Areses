@@ -26,6 +26,19 @@ async def require_auth(
     return user
 
 
+async def get_optional_user(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+    session_token: str | None = Cookie(default=None),
+) -> User | None:
+    if session_token is None:
+        return None
+    user = await auth_service.get_user_from_token(session, session_token)
+    if user is not None:
+        request.state.user_id = user.id
+    return user
+
+
 async def require_admin(user: User = Depends(require_auth)) -> User:
     if not user.is_admin:
         raise HTTPException(

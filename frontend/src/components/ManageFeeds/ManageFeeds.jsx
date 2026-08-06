@@ -37,6 +37,7 @@ export function ManageFeeds({ onClose, onFeedsChanged }) {
     const folder = await api.post("/api/folders", { name: newFolderName });
     setFolders([...folders, folder]);
     setNewFolderName("");
+    onFeedsChanged();
   }
 
   async function deleteFolder(folderId) {

@@ -31,3 +31,8 @@ class UserOut(CamelModel):
     is_admin: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SessionOut(CamelModel):
+    authenticated: bool
+    user: UserOut | None = None

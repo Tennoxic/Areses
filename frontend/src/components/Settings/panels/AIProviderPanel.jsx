@@ -19,18 +19,22 @@ export function AIProviderPanel() {
   const [model, setModel] = useState("");
   const [savedModel, setSavedModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [apiKeyIsSet, setApiKeyIsSet] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     Promise.all([
       api.get("/api/admin/settings/aiProvider"),
       api.get("/api/admin/settings/aiModel"),
       api.get("/api/admin/settings/aiBaseUrl"),
-    ]).then(([p, m, b]) => {
+      api.get("/api/admin/settings/aiApiKey"),
+    ]).then(([p, m, b, k]) => {
       if (p.value) setProvider(p.value);
       if (m.value) { setModel(m.value); setSavedModel(m.value); }
       if (b.value) setBaseUrl(b.value);
+      setApiKeyIsSet(Boolean(k.isSet));
     });
   }, []);
 
@@ -43,11 +47,37 @@ export function AIProviderPanel() {
       if (apiKey) {
         await api.post("/api/admin/settings", { key: "aiApiKey", value: apiKey });
         setApiKey("");
+        setApiKeyIsSet(true);
       }
       setSavedModel(model);
       showToast(t("settings.aiSettingsSaved"));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function clearApiKey() {
+    await api.post("/api/admin/settings", { key: "aiApiKey", value: "" });
+    setApiKeyIsSet(false);
+    setApiKey("");
+    showToast(t("settings.aiApiKeyCleared"));
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    try {
+      const result = await api.post("/api/admin/ai/test", {
+        provider,
+        model,
+        apiKey: apiKey || undefined,
+        baseUrl: baseUrl || undefined,
+      });
+      showToast(
+        result.success ? t("settings.aiTestSuccess") : t("settings.aiTestFailed", { message: result.message }),
+        result.success ? "success" : "error"
+      );
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -80,18 +110,29 @@ export function AIProviderPanel() {
           type="password"
           value={apiKey}
           onChange={(e) => setApiKey(e.target.value)}
-          placeholder={t("settings.aiApiKeyPlaceholder")}
+          placeholder={apiKeyIsSet ? t("settings.aiApiKeySetPlaceholder") : t("settings.aiApiKeyPlaceholder")}
         />
       </label>
+      {apiKeyIsSet && (
+        <p style={{ fontSize: 15, color: "var(--muted)", marginTop: -8, marginBottom: 0, display: "flex", alignItems: "center", gap: 8 }}>
+          {t("settings.aiApiKeyIsSet")}
+          <button className="pill-button pill-button-icon" onClick={clearApiKey} title={t("settings.aiApiKeyClear")}>✕</button>
+        </p>
+      )}
       {provider === "ollama" && (
         <label className="settings-field-label">
           {t("settings.aiBaseUrl")}
           <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:11434" />
         </label>
       )}
-      <button className="pill-button" onClick={save} disabled={saving} style={{ marginTop: 8 }}>
-        {t("settings.aiSaveSettings")}
-      </button>
+      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+        <button className="pill-button" onClick={save} disabled={saving}>
+          {t("settings.aiSaveSettings")}
+        </button>
+        <button className="pill-button" onClick={testConnection} disabled={testing || (!apiKeyIsSet && !apiKey && provider !== "ollama")}>
+          {testing ? t("settings.aiTesting") : t("settings.aiTestConnection")}
+        </button>
+      </div>
     </div>
   );
 }

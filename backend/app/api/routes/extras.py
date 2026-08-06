@@ -1,5 +1,7 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin, require_auth
@@ -15,7 +17,7 @@ from app.db.models import (
 )
 from app.db.session import get_session
 from app.schemas.base import CamelModel
-from app.services import push_service, settings_service
+from app.services import feed_discovery, push_service, settings_service
 
 router = APIRouter(prefix="/api", tags=["extras"])
 
@@ -79,6 +81,23 @@ class DataExportOut(CamelModel):
     subscriptions: list[SubscriptionExportItem]
     article_states: list[ArticleStateExportItem]
     saved_searches: list[SavedSearchExportItem]
+
+
+class DataImportRequest(CamelModel):
+    folders: list[FolderExportItem] = []
+    subscriptions: list[SubscriptionExportItem] = []
+    article_states: list[ArticleStateExportItem] = []
+    saved_searches: list[SavedSearchExportItem] = []
+    mode: Literal["merge", "overwrite"] = "merge"
+
+
+class DataImportOut(CamelModel):
+    folders_created: int
+    subscriptions_created: int
+    subscriptions_skipped: int
+    article_states_applied: int
+    article_states_skipped: int
+    saved_searches_created: int
 
 
 @router.get("/push/vapid-public-key", response_model=VapidPublicKeyOut)
@@ -175,6 +194,123 @@ async def export_my_data(
         subscriptions=[SubscriptionExportItem(**s) for s in subscriptions],
         article_states=[ArticleStateExportItem(**a) for a in article_states],
         saved_searches=[SavedSearchExportItem(**s) for s in saved_searches],
+    )
+
+
+@router.post("/import/my-data", response_model=DataImportOut)
+async def import_my_data(
+    body: DataImportRequest,
+    user: User = Depends(require_auth),
+    session: AsyncSession = Depends(get_session),
+) -> DataImportOut:
+    if body.mode == "overwrite":
+        await session.execute(delete(UserArticleState).where(UserArticleState.user_id == user.id))
+        await session.execute(delete(Subscription).where(Subscription.user_id == user.id))
+        await session.execute(delete(SavedSearch).where(SavedSearch.user_id == user.id))
+        await session.execute(delete(Folder).where(Folder.user_id == user.id))
+        await session.flush()
+
+    existing_folders_result = await session.execute(
+        select(Folder).where(Folder.user_id == user.id)
+    )
+    folder_id_by_name = {f.name: f.id for f in existing_folders_result.scalars().all()}
+
+    folder_id_remap: dict[int, int] = {}
+    folders_created = 0
+    for item in body.folders:
+        if item.name in folder_id_by_name:
+            folder_id_remap[item.id] = folder_id_by_name[item.name]
+            continue
+        folder = Folder(user_id=user.id, name=item.name, parent_id=None)
+        session.add(folder)
+        await session.flush()
+        folder_id_remap[item.id] = folder.id
+        folder_id_by_name[item.name] = folder.id
+        folders_created += 1
+
+    for item in body.folders:
+        if item.parent_id is None:
+            continue
+        new_id = folder_id_remap.get(item.id)
+        new_parent_id = folder_id_remap.get(item.parent_id)
+        if new_id is not None and new_parent_id is not None and new_id != new_parent_id:
+            await session.execute(
+                update(Folder).where(Folder.id == new_id).values(parent_id=new_parent_id)
+            )
+
+    existing_subs_result = await session.execute(
+        select(Subscription.source_id).where(Subscription.user_id == user.id)
+    )
+    subscribed_source_ids = {row[0] for row in existing_subs_result.all()}
+
+    subscriptions_created = 0
+    subscriptions_skipped = 0
+    for item in body.subscriptions:
+        source = await feed_discovery.get_or_create_source_by_url(session, item.url)
+        if source.id in subscribed_source_ids:
+            subscriptions_skipped += 1
+            continue
+        mapped_folder_id = (
+            folder_id_remap.get(item.folder_id) if item.folder_id is not None else None
+        )
+        session.add(
+            Subscription(
+                user_id=user.id,
+                source_id=source.id,
+                folder_id=mapped_folder_id,
+                custom_name=item.custom_name,
+            )
+        )
+        source.active = True
+        subscribed_source_ids.add(source.id)
+        subscriptions_created += 1
+
+    article_states_applied = 0
+    article_states_skipped = 0
+    for item in body.article_states:
+        article_result = await session.execute(
+            select(Article.id).where(Article.url == item.article_url)
+        )
+        article_id = article_result.scalar_one_or_none()
+        if article_id is None:
+            article_states_skipped += 1
+            continue
+        existing_state_result = await session.execute(
+            select(UserArticleState).where(
+                UserArticleState.user_id == user.id,
+                UserArticleState.article_id == article_id,
+            )
+        )
+        state = existing_state_result.scalar_one_or_none()
+        if state is None:
+            state = UserArticleState(user_id=user.id, article_id=article_id)
+            session.add(state)
+        state.is_read = state.is_read or item.is_read
+        state.starred = state.starred or item.starred
+        state.read_later = state.read_later or item.read_later
+        article_states_applied += 1
+
+    existing_searches_result = await session.execute(
+        select(SavedSearch.name).where(SavedSearch.user_id == user.id)
+    )
+    existing_search_names = {row[0] for row in existing_searches_result.all()}
+
+    saved_searches_created = 0
+    for item in body.saved_searches:
+        if item.name in existing_search_names:
+            continue
+        session.add(SavedSearch(user_id=user.id, name=item.name, query=item.query))
+        existing_search_names.add(item.name)
+        saved_searches_created += 1
+
+    await session.commit()
+    return DataImportOut(
+        folders_created=folders_created,
+        subscriptions_created=subscriptions_created,
+        subscriptions_skipped=subscriptions_skipped,
+        article_states_applied=article_states_applied,
+        article_states_skipped=article_states_skipped,
+        saved_searches_created=saved_searches_created,
     )
 
 

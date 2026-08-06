@@ -44,6 +44,28 @@ async def test_me_requires_authentication(client):
 
 
 @pytest.mark.asyncio
+async def test_session_does_not_error_when_logged_out(client):
+    response = await client.get("/api/auth/session")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["authenticated"] is False
+    assert body["user"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_reports_authenticated_user_after_login(client, registered_user):
+    await client.post(
+        "/api/auth/login",
+        json={"username": registered_user["username"], "password": registered_user["password"], "rememberMe": False},
+    )
+    response = await client.get("/api/auth/session")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["authenticated"] is True
+    assert body["user"]["username"] == registered_user["username"]
+
+
+@pytest.mark.asyncio
 async def test_full_auth_lifecycle(client, registered_user):
     login = await client.post(
         "/api/auth/login",

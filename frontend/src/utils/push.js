@@ -11,6 +11,10 @@ export async function isPushSupported() {
   return "serviceWorker" in navigator && "PushManager" in window;
 }
 
+export function isSecureContextForPush() {
+  return typeof window !== "undefined" && window.isSecureContext === true;
+}
+
 export async function getPushSubscriptionStatus() {
   if (!(await isPushSupported())) return "unsupported";
   const registration = await navigator.serviceWorker.ready;
@@ -19,6 +23,11 @@ export async function getPushSubscriptionStatus() {
 }
 
 export async function subscribeToPush() {
+  if (!isSecureContextForPush()) {
+    const error = new Error("insecure_context");
+    error.code = "insecure_context";
+    throw error;
+  }
   const registration = await navigator.serviceWorker.ready;
   const { publicKey } = await api.get("/api/push/vapid-public-key");
   const subscription = await registration.pushManager.subscribe({
