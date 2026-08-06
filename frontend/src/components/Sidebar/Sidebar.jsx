@@ -22,7 +22,6 @@ function saveCollapsedFolderIds(ids) {
   try {
     localStorage.setItem(COLLAPSED_FOLDERS_KEY, JSON.stringify([...ids]));
   } catch {
-    /* localStorage unavailable, collapse state just won't persist */
   }
 }
 
